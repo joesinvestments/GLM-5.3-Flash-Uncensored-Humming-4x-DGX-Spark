@@ -85,10 +85,12 @@ image-main/  the production build: build.sh, patches/vllm/series (18 vLLM patche
 image/       the v0.30 build: build.sh, 13 vLLM + 2 FlashInfer patches + optional 09, EXPECTED.sha256, nccl/
 launch/      launch_node.sh (main build) and launch_node_v030.sh (v0.30 build): the exact serving flags, one rank per node
 template/    chat_template_zai0907_optout.jinja: Z.ai's official 09-07 template plus one opt-out line
+quantize/    the scripts that built our checkpoint from Blackfrost's BF16 master (see docs/quantization.md)
 tools/       ab_harness.py (speed + acceptance), agent_sessions.py (1 to 8 concurrent agent sessions),
              quality_eval.py, analyze_trace.py (profiler breakdown)
 tools/lab/   lab_run.sh: a safe way to run experiments (or an AI agent) on a cluster that is also serving
-docs/        patches.md (what each patch does and where it came from), findings.md (profile, experiments, lessons)
+docs/        patches.md (what each patch does and where it came from), findings.md (profile, experiments, lessons),
+             quantization.md (how to build our checkpoint yourself)
 ```
 
 ## Quick start
@@ -103,7 +105,10 @@ The script copies the target files out of the base image, applies the series in 
 *Release-based alternative:* `cd image && ./build.sh` builds `glm53-flash-gb10:v0.30.0` from stock `vllm/vllm-openai:v0.30.0` (Marlin MoE, `WITH_PATCH_09=1` adds the optional patch). Launch it with `launch/launch_node_v030.sh` in step 4.
 
 **2. Get the weights onto every node** (not redistributed here; follow each license):
-- Checkpoint: [Blackfrost-AI/GLM-5.3-Flash-DERISKED-NVFP4](https://huggingface.co/Blackfrost-AI/GLM-5.3-Flash-DERISKED-NVFP4), converted to NVFP4 attention with Tony's recipe in [tonyd2wild/GLM-5.3-Flash-NVFP4-1M-KV-4x-DGX-Spark](https://github.com/tonyd2wild/GLM-5.3-Flash-NVFP4-1M-KV-4x-DGX-Spark) (`runs/2026-09-21-blackfrost-derisked/`). The numbers above use our requantization of the same weights from Blackfrost's BF16 (same tensors, same layout, a drop-in; see `docs/findings.md`).
+- Checkpoint: [Blackfrost-AI/GLM-5.3-Flash-DERISKED-NVFP4](https://huggingface.co/Blackfrost-AI/GLM-5.3-Flash-DERISKED-NVFP4), converted to NVFP4 attention with Tony's recipe in [tonyd2wild/GLM-5.3-Flash-NVFP4-1M-KV-4x-DGX-Spark](https://github.com/tonyd2wild/GLM-5.3-Flash-NVFP4-1M-KV-4x-DGX-Spark) (`runs/2026-09-21-blackfrost-derisked/`). The numbers above use our requantization of the same weights from Blackfrost's BF16 master (same tensors, same layout, a drop-in; see `docs/findings.md`). Blackfrost licenses the BF16 master commercially, so that checkpoint is not published; the MIT NVFP4 release above is the public route.
+
+  > **A note from Joe:** I do not know if I can distribute weights made from Blackfrost's BF16 master, so instead of the weights, here is the formula to make them yourself: [docs/quantization.md](docs/quantization.md). If you need help, open an issue or reach out to me.
+
 - Drafter: [incoai/GLM-5.3-Flash-DFlash2](https://huggingface.co/incoai/GLM-5.3-Flash-DFlash2) at revision `7d74cdd881ed7e32c31175984a67823127b66cfe`, in `$HF_ROOT/hub/glm53-flash-dflash2/`. Patch 10 packs its projections to 8 bits when the server loads it (`VLLM_DRAFTER_W8A16=1` in the launcher); the files on disk are unchanged.
 
 **3. Put the chat template next to the checkpoint** on every node:
@@ -217,7 +222,7 @@ The 2026-09-25 build vs the first release (2026-09-23). `tools/ab_harness.py` (t
 ## Credits
 
 - **Tony ([@2WildTech](https://x.com/2WildTech), [tonyd2wild](https://github.com/tonyd2wild))**: the GB10 patch set and image that patches 01 to 08 are ported from, the two FlashInfer FP8 MLA fixes, and the NVFP4-attention conversion recipe. Both builds start from stock vLLM images; his work reaches them as patches.
-- **[Blackfrost](https://huggingface.co/Blackfrost-AI) ([@Blackfrost_AI](https://x.com/Blackfrost_AI))**: GLM-5.3-Flash-DERISKED (MIT), in NVFP4 and BF16. The checkpoint served here requantizes their weights; per their model card, Blackfrost has not evaluated modified versions. **[Z.ai](https://huggingface.co/zai-org) ([@Zai_org](https://x.com/Zai_org))**: GLM-5.3-Flash (MIT) and the official chat template.
+- **[Blackfrost](https://huggingface.co/Blackfrost-AI) ([@Blackfrost_AI](https://x.com/Blackfrost_AI))**: GLM-5.3-Flash-DERISKED, released as NVFP4 (MIT) and as a BF16 master under Blackfrost's commercial licence (gated, access reviewed by Blackfrost). The checkpoint served here is our requantization of the BF16 master for our own use and is not redistributed; per their model card, Blackfrost has not evaluated modified versions. **[Z.ai](https://huggingface.co/zai-org) ([@Zai_org](https://x.com/Zai_org))**: GLM-5.3-Flash (MIT) and the official chat template.
 - **[incoai](https://huggingface.co/incoai)**: the GLM-5.3-Flash DFlash2 drafter (CC BY-NC-ND 4.0), built on DFlash from [Z Lab](https://github.com/z-lab/dflash) ([@zhijianliu_](https://x.com/zhijianliu_)).
 - **[Humming](https://github.com/vllm-project/humming)** ([Jinzhen Lin](https://github.com/jinzhen-lin), [Julian Huang](https://github.com/huangzhilin-hzl), [Misha Goin](https://github.com/mgoin) ([@mgoin_](https://x.com/mgoin_)) and the Humming contributors, Apache-2.0): the MoE backend in the main build.
 - **vLLM contributors in the shipped stack:** [Matt Mastracci](https://github.com/mmastrac) ([@mmastrac](https://x.com/mmastrac); #58704, #58454), [JaredforReal](https://github.com/JaredforReal) (#57477, now in vLLM main) and [Juntian777](https://github.com/Juntian777) (#57632), [shiweijiezero](https://github.com/shiweijiezero) (#58834) and [QHarshil](https://github.com/QHarshil) (#58021). We also carry vLLM's own revert #58250 of [mgoin](https://github.com/mgoin)'s fused DFlash2 grouped convolution (#55960). Tested in the short-turn caching work, not shipped: [netanel-haber](https://github.com/netanel-haber) (#58368) and [njhill](https://github.com/njhill) (#58434).

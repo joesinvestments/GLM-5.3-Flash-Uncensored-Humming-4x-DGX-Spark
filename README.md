@@ -2,6 +2,8 @@
 
 **A reproducible build for serving Blackfrost's uncensored GLM-5.3-Flash ([DERISKED](https://huggingface.co/Blackfrost-AI/GLM-5.3-Flash-DERISKED-NVFP4), NVFP4) across four NVIDIA DGX Spark (GB10) nodes at tensor parallel 4, with DFlash2 speculative decoding.**
 
+> **Update 2026-09-27, a note from Joe:** I recommend you stick with the Blackfrost weights: Blackfrost's published NVFP4, converted to NVFP4 attention with Tony's recipe ([step 2](#quick-start)). GLM has been working much better with the factory Blackfrost weights in my long agentic sessions than with my own requantization, even though the requantization scored better on every short test we run (NLL/token 1.2663 against 1.2886 on 40 WikiText-2 chunks on this build; GSM8K 99.2% against 98.4% on 2026-09-24). Since 2026-09-27, production runs the Blackfrost weights again. The recipe stays in `quantize/` for anyone who wants to experiment.
+
 Since 2026-09-26 our production runs the **vLLM main nightly** (commit `7f1a5398e9`) with our 18-patch series, the **Humming** MoE backend and **Z.ai's official chat template**. The earlier build on the vLLM v0.30.0 release is still here and still works. Both builds start from stock vLLM images, copy in patched files only, and refuse to build unless every patched file matches the checksums of the image they reproduce: today's production for the main build, the previous production (now the rollback) for the v0.30 build. Everything was measured on our own cluster, including the experiments that did not pay off.
 
 | | Main build (production) | v0.30 build (kept) |
@@ -13,7 +15,7 @@ Since 2026-09-26 our production runs the **vLLM main nightly** (commit `7f1a5398
 | Optional NCCL fence fix | NCCL 2.30.7 + [NVIDIA/nccl#2393](https://github.com/NVIDIA/nccl/pull/2393) | NCCL 2.29.7 + #2393 |
 | Build and launch | `image-main/build.sh`, `launch/launch_node.sh` | `image/build.sh`, `launch/launch_node_v030.sh` |
 
-Everything else is identical in the two launchers: our NVFP4 checkpoint, incoai's DFlash2 drafter with 8-bit projections, block verification, draft length by batch size, `disable_eagle_block_drop`, a 36 GiB fp8 KV cache, 2,304-token blocks and the chat template.
+Everything else is identical in the two launchers: the checkpoint (Blackfrost's NVFP4 with Tony's NVFP4 attention, see the update above), incoai's DFlash2 drafter with 8-bit projections, block verification, draft length by batch size, `disable_eagle_block_drop`, a 36 GiB fp8 KV cache, 2,304-token blocks and the chat template.
 
 ## Why vLLM main plus Humming
 
@@ -26,6 +28,8 @@ We chose this path knowing what it costs, measured on the long agent-session loa
 - **Quality: equal or better** on every probe we run (table below).
 
 ## Results (2026-09-26)
+
+Measured with our requantized checkpoint, before the 2026-09-27 switch back to the Blackfrost weights (same size and layout).
 
 **Load:** long agent sessions (about 19K-token prompts) at 1, 2, 4 and 8 concurrent sessions, every request with `reasoning_effort` max (as our agent clients send it), replies capped at 768 tokens, 2 sweeps per stack. v0.30 is pooled over 3 boots.
 
@@ -50,13 +54,14 @@ Quality:
 | GSM8K, 250 problems, thinking off | 98.4% | 98.4% | 98.4% |
 | Cached tokens when 6 long sessions resume | 18,432 / 18,432 / 18,432 / 16,128 / 16,128 / 18,432 | the same | the same |
 
+- With the Blackfrost weights (production since 2026-09-27) the final stack reads NLL/token 1.28860 on the same 40 chunks.
 - Uncensored gate (65 adult prompts in 12 categories): PASS for vLLM main and for the final stack.
 - The checkpoint A/B of 2026-09-24 (below) read 99.2% on GSM8K for this checkpoint; this run read 98.4% on all three stacks.
 - The results above were measured on the main build before its last two patches (u58834, u58021) were added on 2026-09-26. Neither runs in this configuration, so they describe what serves.
 
 ### Short prompts on the main build (2026-09-26)
 
-The same benchmark as the v0.30 table further down, run on production (the main build) on 2026-09-26: `tools/ab_harness.py` 3 times (temperature 0, thinking off, max 400 tokens; median of 3) and `tools/agent_sessions.py` 3 sweeps (3-turn tool loops with 1 to 3K-token prompts, half the sessions thinking, default sampling; mean of 3). No other traffic reached the server during either run.
+The same benchmark as the v0.30 table further down, run on production (the main build) on 2026-09-26: `tools/ab_harness.py` 3 times (temperature 0, thinking off, max 400 tokens; median of 3) and `tools/agent_sessions.py` 3 sweeps (3-turn tool loops with 1 to 3K-token prompts, half the sessions thinking, default sampling; mean of 3). No other traffic reached the server during either run. Measured with our requantized checkpoint.
 
 | Load | Main build (production) | Range | v0.30 build (2026-09-25) | First release (2026-09-23) |
 |---|---|---|---|---|
@@ -85,7 +90,7 @@ image-main/  the production build: build.sh, patches/vllm/series (18 vLLM patche
 image/       the v0.30 build: build.sh, 13 vLLM + 2 FlashInfer patches + optional 09, EXPECTED.sha256, nccl/
 launch/      launch_node.sh (main build) and launch_node_v030.sh (v0.30 build): the exact serving flags, one rank per node
 template/    chat_template_zai0907_optout.jinja: Z.ai's official 09-07 template plus one opt-out line
-quantize/    the scripts that built our checkpoint from Blackfrost's BF16 master (see docs/quantization.md)
+quantize/    the scripts that built our requantized checkpoint (not recommended, see the 2026-09-27 update)
 tools/       ab_harness.py (speed + acceptance), agent_sessions.py (1 to 8 concurrent agent sessions),
              quality_eval.py, analyze_trace.py (profiler breakdown)
 tools/lab/   lab_run.sh: a safe way to run experiments (or an AI agent) on a cluster that is also serving
@@ -105,9 +110,9 @@ The script copies the target files out of the base image, applies the series in 
 *Release-based alternative:* `cd image && ./build.sh` builds `glm53-flash-gb10:v0.30.0` from stock `vllm/vllm-openai:v0.30.0` (Marlin MoE, `WITH_PATCH_09=1` adds the optional patch). Launch it with `launch/launch_node_v030.sh` in step 4.
 
 **2. Get the weights onto every node** (not redistributed here; follow each license):
-- Checkpoint: [Blackfrost-AI/GLM-5.3-Flash-DERISKED-NVFP4](https://huggingface.co/Blackfrost-AI/GLM-5.3-Flash-DERISKED-NVFP4), converted to NVFP4 attention with Tony's recipe in [tonyd2wild/GLM-5.3-Flash-NVFP4-1M-KV-4x-DGX-Spark](https://github.com/tonyd2wild/GLM-5.3-Flash-NVFP4-1M-KV-4x-DGX-Spark) (`runs/2026-09-21-blackfrost-derisked/`). The numbers above use our requantization of the same weights from Blackfrost's BF16 master (same tensors, same layout, a drop-in; see `docs/findings.md`). Blackfrost licenses the BF16 master commercially, so that checkpoint is not published; the MIT NVFP4 release above is the public route.
+- Checkpoint: [Blackfrost-AI/GLM-5.3-Flash-DERISKED-NVFP4](https://huggingface.co/Blackfrost-AI/GLM-5.3-Flash-DERISKED-NVFP4), converted to NVFP4 attention with Tony's recipe in [tonyd2wild/GLM-5.3-Flash-NVFP4-1M-KV-4x-DGX-Spark](https://github.com/tonyd2wild/GLM-5.3-Flash-NVFP4-1M-KV-4x-DGX-Spark) (`runs/2026-09-21-blackfrost-derisked/`). This is the checkpoint production serves. Most numbers above were measured with our requantization of the same weights from Blackfrost's BF16 master (same tensors, same layout, a drop-in; see `docs/findings.md`).
 
-  > **A note from Joe:** I do not know if I can distribute weights made from Blackfrost's BF16 master, so instead of the weights, here is the formula to make them yourself: [docs/quantization.md](docs/quantization.md). If you need help, open an issue or reach out to me.
+  > **A note from Joe:** I recommend you stick with these Blackfrost weights. They have been working much better in my long agentic sessions than my own requantization. The formula for that requantization is in [docs/quantization.md](docs/quantization.md) for anyone who wants to experiment. If you need help, open an issue or reach out to me.
 
 - Drafter: [incoai/GLM-5.3-Flash-DFlash2](https://huggingface.co/incoai/GLM-5.3-Flash-DFlash2) at revision `7d74cdd881ed7e32c31175984a67823127b66cfe`, in `$HF_ROOT/hub/glm53-flash-dflash2/`. Patch 10 packs its projections to 8 bits when the server loads it (`VLLM_DRAFTER_W8A16=1` in the launcher); the files on disk are unchanged.
 
@@ -173,7 +178,7 @@ Each change was measured against the build before it, on the load it targets, wi
 | Change | Result | Measured with |
 |---|---|---|
 | **Three long-context correctness fixes** (patches 12 to 14) | NLL/token on two long documents 1.578 and 1.118, down from 1.648 and 1.225 (4.3% and 8.8% lower). Speed unchanged: 1.04x tok/s, 0.99x time to first token | two WikiText-2 documents of about 11K tokens each (prompt logprobs); long agent sessions at 1, 2, 4 and 8 |
-| **Our own NVFP4 checkpoint**, requantized from Blackfrost's BF16 with an MSE scale search | NLL/token 1.26587 vs 1.29080 (paired difference -0.025, plus or minus 0.0075); GSM8K 99.2% vs 98.4%. The same agent tasks finished in 0.80x the time (fewer answers ran into the length limit: 1 vs 7), at the same tok/s | 40 WikiText-2 chunks and 250 GSM8K problems; agent sessions with both checkpoints in one session |
+| **Our own NVFP4 checkpoint**, requantized from Blackfrost's BF16 with an MSE scale search | NLL/token 1.26587 vs 1.29080 (paired difference -0.025, plus or minus 0.0075); GSM8K 99.2% vs 98.4%. The same agent tasks finished in 0.80x the time (fewer answers ran into the length limit: 1 vs 7), at the same tok/s. **2026-09-27:** in long agentic sessions the Blackfrost weights worked much better, so production runs them again | 40 WikiText-2 chunks and 250 GSM8K problems; agent sessions with both checkpoints in one session |
 | **8-bit drafter projections** (patch 10) | +8.6% (95% interval +5.0% to +12.6%); 8 sessions 84.5 vs 71.0 tok/s; acceptance unchanged | agent sessions at 1, 2, 4 and 8, paired by sweep |
 | **Keep the cached block when an agent session resumes** (`disable_eagle_block_drop`) | time to first token 0.68x (1 session 2.43 to 1.63 s, 8 sessions 5.7 to 3.9 s); prefix-cache hit rate 70% to 83% | long agent sessions (about 19K-token prompts) at 1, 2, 4 and 8, production measured before and after |
 | **Block verification and draft length by batch size** (7 tokens at 1 request, 5 at 2 to 3, 4 at 4 or more) | +4.4% (95% interval -0.4% to +9.7%, so within noise) | agent sessions at 1, 2, 4 and 8 |

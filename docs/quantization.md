@@ -1,8 +1,10 @@
 # Quantizing GLM-5.3-Flash DERISKED yourself
 
+> **Update 2026-09-27, a note from Joe:** I recommend you stick with the Blackfrost weights (Blackfrost's published NVFP4 with Tony's NVFP4 attention, step 2 of the README quick start). This requantization scored better on every short test below, but GLM has been working much better with the factory Blackfrost weights in my long agentic sessions, so production runs those again. The recipe stays here for anyone who wants to experiment.
+
 **A note from Joe.** I do not know if I can distribute weights made from Blackfrost's BF16 master: Blackfrost licenses it commercially and reviews access by hand. So instead of the weights, here is the formula to make them yourself. If you need help, open an issue or reach out to me.
 
-The checkpoint behind every number in this repo is our own NVFP4 quantization of Blackfrost's [GLM-5.3-Flash-DERISKED-BF16](https://huggingface.co/Blackfrost-AI/GLM-5.3-Flash-DERISKED-BF16). The scripts in [`quantize/`](../quantize) are the exact code that built it.
+The checkpoint behind the 2026-09-24 to 2026-09-26 numbers in this repo is our own NVFP4 quantization of Blackfrost's [GLM-5.3-Flash-DERISKED-BF16](https://huggingface.co/Blackfrost-AI/GLM-5.3-Flash-DERISKED-BF16). The scripts in [`quantize/`](../quantize) are the exact code that built it.
 
 ## What it does
 
